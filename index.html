@@ -71,7 +71,6 @@
 </div>
 
 <script>
-    // These must match the Arduino UUIDs to read/write the correct data
     const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
@@ -92,17 +91,20 @@
         try {
             statusDiv.innerText = "Status: Opening device selector...";
             
-            // FIXED: Removed strict name filter. Now shows all discoverable Bluetooth devices.
-            // "optionalServices" is required when acceptAllDevices is true so the browser knows we want to use our custom UUID service.
+            // FIXED FILTER: We now look for any device matching the custom service UUID OR named "Zanieke's Device".
+            // This prevents the browser from throwing an "Unsupported" or "Unknown" block.
             const device = await navigator.bluetooth.requestDevice({
-                acceptAllDevices: true,
+                filters: [
+                    { services: [SERVICE_UUID] },
+                    { namePrefix: "Zanieke" }
+                ],
                 optionalServices: [SERVICE_UUID]
             });
 
             deviceCache = device;
             device.addEventListener('gattserverdisconnected', onDisconnected);
 
-            statusDiv.innerText = `Status: Connecting to ${device.name || 'Unnamed Device'}...`;
+            statusDiv.innerText = `Status: Connecting to ${device.name || 'Device'}...`;
             const server = await device.gatt.connect();
 
             statusDiv.innerText = "Status: Fetching BLE Service...";
@@ -111,7 +113,7 @@
             statusDiv.innerText = "Status: Fetching Characteristic...";
             characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
 
-            statusDiv.innerText = `Connected to: ${device.name || 'Device'}`;
+            statusDiv.innerText = `Connected to: ${device.name || 'Zanieke\'s Device'}`;
             connectBtn.innerText = "Disconnect";
             msgInput.disabled = false;
             sendBtn.disabled = false;
