@@ -62,7 +62,7 @@
 
 <div class="container">
     <h2>Zanieke's Device Control</h2>
-    <button id="connectBtn">Connect to Device</button>
+    <button id="connectBtn">Find Bluetooth Devices</button>
     
     <input type="text" id="msgInput" placeholder="Type your message here..." disabled>
     <button id="sendBtn" disabled>Send to OLED</button>
@@ -71,7 +71,7 @@
 </div>
 
 <script>
-    // These UUIDs must match the Arduino BLE Configuration exactly
+    // These must match the Arduino UUIDs to read/write the correct data
     const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
@@ -90,18 +90,19 @@
         }
 
         try {
-            statusDiv.innerText = "Status: Searching for Zanieke's Device...";
+            statusDiv.innerText = "Status: Opening device selector...";
             
-            // Filter by the specific device name specified
+            // FIXED: Removed strict name filter. Now shows all discoverable Bluetooth devices.
+            // "optionalServices" is required when acceptAllDevices is true so the browser knows we want to use our custom UUID service.
             const device = await navigator.bluetooth.requestDevice({
-                filters: [{ name: "Zanieke's Device" }],
+                acceptAllDevices: true,
                 optionalServices: [SERVICE_UUID]
             });
 
             deviceCache = device;
             device.addEventListener('gattserverdisconnected', onDisconnected);
 
-            statusDiv.innerText = "Status: Connecting to GATT Server...";
+            statusDiv.innerText = `Status: Connecting to ${device.name || 'Unnamed Device'}...`;
             const server = await device.gatt.connect();
 
             statusDiv.innerText = "Status: Fetching BLE Service...";
@@ -110,7 +111,7 @@
             statusDiv.innerText = "Status: Fetching Characteristic...";
             characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
 
-            statusDiv.innerText = "Status: Connected!";
+            statusDiv.innerText = `Connected to: ${device.name || 'Device'}`;
             connectBtn.innerText = "Disconnect";
             msgInput.disabled = false;
             sendBtn.disabled = false;
@@ -127,7 +128,6 @@
 
         try {
             statusDiv.innerText = "Status: Sending message...";
-            // Encode the string data to bytes and transmit
             const encoder = new TextEncoder();
             await characteristicCache.writeValue(encoder.encode(text));
             statusDiv.innerText = "Status: Message Sent Successfully!";
@@ -138,7 +138,7 @@
 
     function onDisconnected() {
         statusDiv.innerText = "Status: Disconnected";
-        connectBtn.innerText = "Connect to Device";
+        connectBtn.innerText = "Find Bluetooth Devices";
         msgInput.disabled = true;
         sendBtn.disabled = true;
         characteristicCache = null;
