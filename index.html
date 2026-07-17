@@ -69,22 +69,23 @@
         }
         button:active { transform: scale(0.98); }
         
-        /* Message Box & Notification Light Configurations */
+        /* Alert Bar & Status Light Configurations */
         .notification-bar {
             background: #1f222e;
-            padding: 14px;
+            padding: 16px;
             border-radius: 12px;
-            margin: 15px 0;
+            margin: 20px 0;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            font-size: 14px;
+            gap: 12px;
+            font-size: 15px;
             font-weight: 500;
+            border: 1px solid #2a2d3d;
         }
         .status-light {
-            width: 12px;
-            height: 12px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
             transition: background-color 0.4s, box-shadow 0.4s;
         }
@@ -95,18 +96,6 @@
         .light-green {
             background-color: var(--success-color);
             box-shadow: 0 0 10px var(--success-color);
-        }
-        
-        .message-display-box {
-            background: #1a1d29;
-            border: 1px dashed #3a3f58;
-            border-radius: 12px;
-            padding: 20px;
-            margin: 15px 0;
-            color: #f1f2f6;
-            font-size: 18px;
-            font-style: italic;
-            word-wrap: break-word;
         }
         
         #status {
@@ -150,15 +139,12 @@
 
 <div id="zaniekeView" class="container hidden">
     <h2>Hello Zanieke</h2>
-    <div id="zaniekeSubtitle" class="subtitle">Tap screen to activate automatic reconnection link</div>
+    <div id="zaniekeSubtitle" class="subtitle">Connect your display to read pending transmissions</div>
     
     <div class="notification-bar">
         <div id="notificationLight" class="status-light light-red"></div>
         <span id="notificationText">No New Message Detected</span>
     </div>
-
-    <div class="subtitle" style="margin-bottom: 5px; text-align: left; padding-left: 5px;">Current Message Payload:</div>
-    <div id="messageTextBox" class="message-display-box">Awaiting sync...</div>
 
     <button id="zaniekeConnectBtn">Pair New Device</button>
     <div id="status">Hardware Status: Offline</div>
@@ -189,7 +175,6 @@
     let characteristicCache = null;
     let currentLiveMessage = ""; 
     let isConnectingBackground = false;
-    let lastRenderedTimestamp = 0;
 
     const views = {
         login: document.getElementById('loginView'),
@@ -253,17 +238,16 @@
                 characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
                 
                 statusDiv.innerText = "Hardware Status: Device Synced Successfully!";
-                document.getElementById('zaniekeSubtitle').innerText = "Device auto-linked via background profile!";
                 pushMessageToHardware();
             }
         } catch (err) {
-            console.log("Background link check bypassed:", err.message);
+            console.log("Background link bypass:", err.message);
         } finally {
             isConnectingBackground = false;
         }
     }
 
-    // --- AYUSHMAN PIPELINE ---
+    // --- AYUSHMAN TRANSMITTER ---
     document.getElementById('ayushmanSendBtn').addEventListener('click', async () => {
         const msgText = document.getElementById('ayushmanMsg').value;
         const statusText = document.getElementById('ayushmanStatus');
@@ -282,30 +266,27 @@
         }
     });
 
-    // --- ZANIEKE DATABASE STREAM (WITH LIGHT NOTIFIER & DISPLAY) ---
+    // --- ZANIEKE LIVE DATABASE STREAM ---
     function initZaniekeDatabaseListener() {
         onValue(ref(db, 'messages/zanieke'), (snapshot) => {
             const data = snapshot.val();
             if (data && data.text) {
                 currentLiveMessage = data.text;
                 
-                // RESTORED DISPLAY: The text is visible inside the UI box container
-                document.getElementById('messageTextBox').innerText = `"${currentLiveMessage}"`;
-                
-                // STATUS LIGHT VISUAL MODIFICATION: Turn indicator light green when new data drops
+                // Light turns green here to indicate a message exists, but the text is NEVER displayed in the UI
                 const lightElement = document.getElementById('notificationLight');
                 const lightText = document.getElementById('notificationText');
                 
                 lightElement.classList.remove('light-red');
                 lightElement.classList.add('light-green');
-                lightText.innerText = "New Message Received!";
+                lightText.innerText = "New Message Ready!";
 
                 pushMessageToHardware();
             }
         });
     }
 
-    // Manual pairing sequence handler
+    // Manual backup pairing handler
     document.getElementById('zaniekeConnectBtn').addEventListener('click', async () => {
         const statusDiv = document.getElementById('status');
         try {
@@ -346,9 +327,8 @@
     function onDisconnected() {
         const statusDiv = document.getElementById('status');
         statusDiv.innerText = "Hardware Status: Offline";
-        document.getElementById('zaniekeSubtitle').innerText = "Tap screen to wake automatic link profile";
         
-        // Reset notification configurations down to defaults upon system shutdown
+        // Reset visual alert system back to red defaults on disconnect
         const lightElement = document.getElementById('notificationLight');
         const lightText = document.getElementById('notificationText');
         lightElement.classList.remove('light-green');
