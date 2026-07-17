@@ -11,6 +11,7 @@
             --accent-color: #ff4757;
             --text-color: #ffffff;
             --muted-color: #8b8d99;
+            --success-color: #2ed573;
         }
         body {
             font-family: '-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -38,7 +39,6 @@
         h2 { margin-bottom: 5px; font-weight: 600; }
         .subtitle { color: var(--muted-color); font-size: 14px; margin-bottom: 25px; }
         
-        /* Form Inputs & Buttons */
         input[type="text"] {
             width: 100%;
             padding: 16px;
@@ -68,19 +68,56 @@
             -webkit-tap-highlight-color: transparent;
         }
         button:active { transform: scale(0.98); }
-        button:disabled { background: #3a3d4d; color: var(--muted-color); cursor: not-allowed; }
+        
+        /* Message Box & Notification Light Configurations */
+        .notification-bar {
+            background: #1f222e;
+            padding: 14px;
+            border-radius: 12px;
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .status-light {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            transition: background-color 0.4s, box-shadow 0.4s;
+        }
+        .light-red {
+            background-color: var(--accent-color);
+            box-shadow: 0 0 10px var(--accent-color);
+        }
+        .light-green {
+            background-color: var(--success-color);
+            box-shadow: 0 0 10px var(--success-color);
+        }
+        
+        .message-display-box {
+            background: #1a1d29;
+            border: 1px dashed #3a3f58;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            color: #f1f2f6;
+            font-size: 18px;
+            font-style: italic;
+            word-wrap: break-word;
+        }
         
         #status {
             margin-top: 20px;
-            font-size: 14px;
+            font-size: 13px;
             color: var(--muted-color);
-            background: #1f222e;
-            padding: 12px;
+            background: #1a1d29;
+            padding: 10px;
             border-radius: 10px;
-            word-break: break-word;
         }
         
-        /* View switching utilities */
         .hidden { display: none !important; }
         .logout-btn {
             background: transparent;
@@ -113,9 +150,18 @@
 
 <div id="zaniekeView" class="container hidden">
     <h2>Hello Zanieke</h2>
-    <div class="subtitle">Sync your physical device via Bluetooth</div>
-    <button id="zaniekeConnectBtn">Connect Zanieke's Device</button>
-    <div id="status">Hardware Status: Offline & Disconnected</div>
+    <div id="zaniekeSubtitle" class="subtitle">Tap screen to activate automatic reconnection link</div>
+    
+    <div class="notification-bar">
+        <div id="notificationLight" class="status-light light-red"></div>
+        <span id="notificationText">No New Message Detected</span>
+    </div>
+
+    <div class="subtitle" style="margin-bottom: 5px; text-align: left; padding-left: 5px;">Current Message Payload:</div>
+    <div id="messageTextBox" class="message-display-box">Awaiting sync...</div>
+
+    <button id="zaniekeConnectBtn">Pair New Device</button>
+    <div id="status">Hardware Status: Offline</div>
     <button class="logout-btn" id="logoutBtnZ">Switch User Profile</button>
 </div>
 
@@ -123,7 +169,6 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
     import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
 
-    // Provided Application Parameters
     const firebaseConfig = {
         apiKey: "AIzaSyApxQJFS8Ph-rl6NcTDU3_FiyQ5He_UM6Y",
         authDomain: "the-blob-articles.firebaseapp.com",
@@ -134,26 +179,24 @@
         measurementId: "G-373B7K6SP0"
     };
 
-    // Instantiate Services
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app, "https://the-blob-articles-default-rtdb.firebaseio.com");
 
-    // BLE Constants
     const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
     let deviceCache = null;
     let characteristicCache = null;
     let currentLiveMessage = ""; 
+    let isConnectingBackground = false;
+    let lastRenderedTimestamp = 0;
 
-    // DOM Elements Mapping
     const views = {
         login: document.getElementById('loginView'),
         ayushman: document.getElementById('ayushmanView'),
         zanieke: document.getElementById('zaniekeView')
     };
 
-    // Initial App Routing Check
     window.addEventListener('load', () => {
         const savedRole = localStorage.getItem('userRole');
         if (savedRole === 'A') showView('ayushman');
@@ -168,7 +211,6 @@
         views[targetView].classList.remove('hidden');
     }
 
-    // Login Submission Handler
     document.getElementById('loginBtn').addEventListener('click', () => {
         const rawInput = document.getElementById('loginInput').value.trim().toUpperCase();
         if (rawInput === 'A') {
@@ -178,10 +220,48 @@
             localStorage.setItem('userRole', 'Z');
             showView('zanieke');
             initZaniekeDatabaseListener();
+            attemptBackgroundAutoConnect();
         } else {
-            alert("Invalid Token. Type 'A' for Ayushman or 'Z' for Zanieke.");
+            alert("Invalid Token. Type 'A' or 'Z'.");
         }
     });
+
+    document.body.addEventListener('click', (e) => {
+        if (localStorage.getItem('userRole') === 'Z' && !deviceCache && !isConnectingBackground) {
+            if (e.target.id !== 'logoutBtnZ' && e.target.id !== 'loginBtn') {
+                attemptBackgroundAutoConnect();
+            }
+        }
+    });
+
+    // --- AUTOMATIC BACKGROUND RECONNECT ENGINE ---
+    async function attemptBackgroundAutoConnect() {
+        if (!navigator.bluetooth || !navigator.bluetooth.getDevices) return;
+        
+        const statusDiv = document.getElementById('status');
+        isConnectingBackground = true;
+
+        try {
+            const devices = await navigator.bluetooth.getDevices();
+            const targetDevice = devices.find(d => d.name && d.name.startsWith("Zanieke"));
+
+            if (targetDevice) {
+                statusDiv.innerText = "Hardware Status: Reconnecting quietly...";
+                setupDeviceListeners(targetDevice);
+                const server = await targetDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                
+                statusDiv.innerText = "Hardware Status: Device Synced Successfully!";
+                document.getElementById('zaniekeSubtitle').innerText = "Device auto-linked via background profile!";
+                pushMessageToHardware();
+            }
+        } catch (err) {
+            console.log("Background link check bypassed:", err.message);
+        } finally {
+            isConnectingBackground = false;
+        }
+    }
 
     // --- AYUSHMAN PIPELINE ---
     document.getElementById('ayushmanSendBtn').addEventListener('click', async () => {
@@ -191,98 +271,94 @@
 
         statusText.innerText = "Status: Uploading payload...";
         try {
-            // Write payload directly onto Zanieke's pending device queue path
-            await set(ref(db, 'messages/zanieke'), {
-                text: msgText,
-                timestamp: Date.now()
+            await set(ref(db, 'messages/zanieke'), { 
+                text: msgText, 
+                timestamp: Date.now() 
             });
             statusText.innerText = "Status: Successfully Sent to Cloud Storage!";
             document.getElementById('ayushmanMsg').value = "";
         } catch (err) {
-            statusText.innerText = "Error tracking database upload: " + err.message;
+            statusText.innerText = "Error: " + err.message;
         }
     });
 
-    // --- ZANIEKE PIPELINE & HARDWARE ENGINE ---
+    // --- ZANIEKE DATABASE STREAM (WITH LIGHT NOTIFIER & DISPLAY) ---
     function initZaniekeDatabaseListener() {
-        // Stream values quietly from cloud storage; do not show them on Zanieke's browser interface screen
         onValue(ref(db, 'messages/zanieke'), (snapshot) => {
             const data = snapshot.val();
             if (data && data.text) {
                 currentLiveMessage = data.text;
-                // If the hardware device link is currently up, flash the text immediately over the air
+                
+                // RESTORED DISPLAY: The text is visible inside the UI box container
+                document.getElementById('messageTextBox').innerText = `"${currentLiveMessage}"`;
+                
+                // STATUS LIGHT VISUAL MODIFICATION: Turn indicator light green when new data drops
+                const lightElement = document.getElementById('notificationLight');
+                const lightText = document.getElementById('notificationText');
+                
+                lightElement.classList.remove('light-red');
+                lightElement.classList.add('light-green');
+                lightText.innerText = "New Message Received!";
+
                 pushMessageToHardware();
             }
         });
     }
 
+    // Manual pairing sequence handler
     document.getElementById('zaniekeConnectBtn').addEventListener('click', async () => {
         const statusDiv = document.getElementById('status');
-        const connectBtn = document.getElementById('zaniekeConnectBtn');
-
-        if (deviceCache && deviceCache.gatt.connected) {
-            deviceCache.disconnect();
-            return;
-        }
-
         try {
-            statusDiv.innerText = "Hardware Status: Activating Local Bluetooth Scanner...";
+            statusDiv.innerText = "Hardware Status: Opening Bluetooth Scanner...";
             const device = await navigator.bluetooth.requestDevice({
-                filters: [
-                    { services: [SERVICE_UUID] },
-                    { namePrefix: "Zanieke" }
-                ],
+                filters: [{ services: [SERVICE_UUID] }, { namePrefix: "Zanieke" }],
                 optionalServices: [SERVICE_UUID]
             });
 
-            deviceCache = device;
-            device.addEventListener('gattserverdisconnected', onDisconnected);
-
-            statusDiv.innerText = `Hardware Status: Securing connection channel...`;
+            setupDeviceListeners(device);
+            statusDiv.innerText = `Hardware Status: Establishing link...`;
             const server = await device.gatt.connect();
-
-            statusDiv.innerText = "Hardware Status: Fetching peripheral data services...";
             const service = await server.getPrimaryService(SERVICE_UUID);
-
-            statusDiv.innerText = "Hardware Status: Binding to display parameters...";
             characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
 
-            statusDiv.innerText = `Connected to: ${device.name || 'Zanieke\'s Device'}`;
-            connectBtn.innerText = "Disconnect Hardware Link";
-
-            // HARDWARE TRIGGER: Instantly download pending text from cache down to physical board right upon connection
+            statusDiv.innerText = "Hardware Status: Device Synced Successfully!";
             pushMessageToHardware();
-
         } catch (error) {
-            statusDiv.innerText = "Hardware Connection Error: " + error.message;
-            console.error(error);
+            statusDiv.innerText = "Connection Error: " + error.message;
         }
     });
 
-    async function pushMessageToHardware() {
-        const statusDiv = document.getElementById('status');
-        if (!characteristicCache || !currentLiveMessage) return;
+    function setupDeviceListeners(device) {
+        deviceCache = device;
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+    }
 
+    async function pushMessageToHardware() {
+        if (!characteristicCache || !currentLiveMessage) return;
         try {
-            statusDiv.innerText = "Hardware Status: Pushing remote cloud text to OLED screen...";
             const encoder = new TextEncoder();
             await characteristicCache.writeValue(encoder.encode(currentLiveMessage));
-            statusDiv.innerText = `Synced! Message on Screen: "${currentLiveMessage}"`;
         } catch (error) {
-            statusDiv.innerText = "Failed transmission update: " + error.message;
+            console.error("Hardware stream exception:", error.message);
         }
     }
 
     function onDisconnected() {
         const statusDiv = document.getElementById('status');
-        const connectBtn = document.getElementById('zaniekeConnectBtn');
-        statusDiv.innerText = "Hardware Status: Offline & Disconnected";
-        connectBtn.innerText = "Connect Zanieke's Device";
+        statusDiv.innerText = "Hardware Status: Offline";
+        document.getElementById('zaniekeSubtitle').innerText = "Tap screen to wake automatic link profile";
+        
+        // Reset notification configurations down to defaults upon system shutdown
+        const lightElement = document.getElementById('notificationLight');
+        const lightText = document.getElementById('notificationText');
+        lightElement.classList.remove('light-green');
+        lightElement.classList.add('light-red');
+        lightText.innerText = "No New Message Detected";
+        
         characteristicCache = null;
         deviceCache = null;
     }
 
-    // Profile reset mechanics
     const runLogout = () => {
         localStorage.clear();
         location.reload();
