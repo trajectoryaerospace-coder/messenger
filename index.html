@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zanieke's Device Controller</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #121212;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background: #1e1e1e;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+        }
+        button {
+            background: #ff4757;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 10px 0;
+            width: 100%;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        button:hover { background: #ff6b81; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            margin: 15px 0;
+            border: 1px solid #333;
+            background: #2f3542;
+            color: white;
+            border-radius: 6px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #a4b0be;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Zanieke's Device Control</h2>
+    <button id="connectBtn">Connect to Device</button>
+    
+    <input type="text" id="msgInput" placeholder="Type your message here..." disabled>
+    <button id="sendBtn" disabled>Send to OLED</button>
+    
+    <div id="status">Status: Disconnected</div>
+</div>
+
+<script>
+    // These UUIDs must match the Arduino BLE Configuration exactly
+    const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+    let deviceCache = null;
+    let characteristicCache = null;
+
+    const connectBtn = document.getElementById('connectBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const msgInput = document.getElementById('msgInput');
+    const statusDiv = document.getElementById('status');
+
+    connectBtn.addEventListener('click', async () => {
+        if (deviceCache && deviceCache.gatt.connected) {
+            deviceCache.disconnect();
+            return;
+        }
+
+        try {
+            statusDiv.innerText = "Status: Searching for Zanieke's Device...";
+            
+            // Filter by the specific device name specified
+            const device = await navigator.bluetooth.requestDevice({
+                filters: [{ name: "Zanieke's Device" }],
+                optionalServices: [SERVICE_UUID]
+            });
+
+            deviceCache = device;
+            device.addEventListener('gattserverdisconnected', onDisconnected);
+
+            statusDiv.innerText = "Status: Connecting to GATT Server...";
+            const server = await device.gatt.connect();
+
+            statusDiv.innerText = "Status: Fetching BLE Service...";
+            const service = await server.getPrimaryService(SERVICE_UUID);
+
+            statusDiv.innerText = "Status: Fetching Characteristic...";
+            characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+            statusDiv.innerText = "Status: Connected!";
+            connectBtn.innerText = "Disconnect";
+            msgInput.disabled = false;
+            sendBtn.disabled = false;
+
+        } catch (error) {
+            statusDiv.innerText = "Error: " + error.message;
+            console.error(error);
+        }
+    });
+
+    sendBtn.addEventListener('click', async () => {
+        const text = msgInput.value;
+        if (!text || !characteristicCache) return;
+
+        try {
+            statusDiv.innerText = "Status: Sending message...";
+            // Encode the string data to bytes and transmit
+            const encoder = new TextEncoder();
+            await characteristicCache.writeValue(encoder.encode(text));
+            statusDiv.innerText = "Status: Message Sent Successfully!";
+        } catch (error) {
+            statusDiv.innerText = "Error sending data: " + error.message;
+        }
+    });
+
+    function onDisconnected() {
+        statusDiv.innerText = "Status: Disconnected";
+        connectBtn.innerText = "Connect to Device";
+        msgInput.disabled = true;
+        sendBtn.disabled = true;
+        characteristicCache = null;
+        deviceCache = null;
+    }
+</script>
+
+</body>
+</html>
