@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Zanieke & Ayushman Portal</title>
+    <title>Zanieke & Ayushman Dual Portal</title>
     <style>
         :root {
             --bg-color: #0d0e12;
@@ -38,6 +38,11 @@
         }
         h2 { margin-bottom: 5px; font-weight: 600; }
         .subtitle { color: var(--muted-color); font-size: 14px; margin-bottom: 25px; }
+        .section-divider {
+            border-top: 1px solid #2a2d3d;
+            margin: 25px 0;
+            padding-top: 20px;
+        }
         
         input[type="text"] {
             width: 100%;
@@ -74,7 +79,7 @@
             background: #1f222e;
             padding: 16px;
             border-radius: 12px;
-            margin: 20px 0;
+            margin: 15px 0;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -98,8 +103,8 @@
             box-shadow: 0 0 10px var(--success-color);
         }
         
-        #status {
-            margin-top: 20px;
+        #statusA, #statusZ {
+            margin-top: 15px;
             font-size: 13px;
             color: var(--muted-color);
             background: #1a1d29;
@@ -130,24 +135,41 @@
 
 <div id="ayushmanView" class="container hidden">
     <h2>Hello Ayushman</h2>
-    <div class="subtitle">Transmit over-the-air to Zanieke's Device</div>
-    <input type="text" id="ayushmanMsg" placeholder="Type a message for Zanieke...">
+    <div class="subtitle">Tap screen to wake up your local device link</div>
+    
+    <div class="notification-bar">
+        <div id="notificationLightA" class="status-light light-red"></div>
+        <span id="notificationTextA">No New Message Detected</span>
+    </div>
+    <button id="ayushmanConnectBtn">Pair Ayushman's Device</button>
+    <div id="statusA">Hardware Status: Offline</div>
+
+    <div class="section-divider"></div>
+    <div class="subtitle" style="text-align: left; margin-bottom: 5px;">Send Message to Zanieke:</div>
+    <input type="text" id="ayushmanMsg" placeholder="Type message for Zanieke...">
     <button id="ayushmanSendBtn">Upload Message to Cloud</button>
-    <div id="ayushmanStatus">Status: Awaiting input...</div>
+    <div id="ayushmanStatus" style="font-size:12px; color:var(--muted-color); margin-top:5px;">Status: Idle</div>
+
     <button class="logout-btn" id="logoutBtnA">Switch User Profile</button>
 </div>
 
 <div id="zaniekeView" class="container hidden">
     <h2>Hello Zanieke</h2>
-    <div id="zaniekeSubtitle" class="subtitle">Connect your display to read pending transmissions</div>
+    <div class="subtitle">Tap screen to wake up your local device link</div>
     
     <div class="notification-bar">
-        <div id="notificationLight" class="status-light light-red"></div>
-        <span id="notificationText">No New Message Detected</span>
+        <div id="notificationLightZ" class="status-light light-red"></div>
+        <span id="notificationTextZ">No New Message Detected</span>
     </div>
+    <button id="zaniekeConnectBtn">Pair Zanieke's Device</button>
+    <div id="statusZ">Hardware Status: Offline</div>
 
-    <button id="zaniekeConnectBtn">Pair New Device</button>
-    <div id="status">Hardware Status: Offline</div>
+    <div class="section-divider"></div>
+    <div class="subtitle" style="text-align: left; margin-bottom: 5px;">Send Message to Ayushman:</div>
+    <input type="text" id="zaniekeMsg" placeholder="Type message for Ayushman...">
+    <button id="zaniekeSendBtn">Upload Message to Cloud</button>
+    <div id="zaniekeStatus" style="font-size:12px; color:var(--muted-color); margin-top:5px;">Status: Idle</div>
+
     <button class="logout-btn" id="logoutBtnZ">Switch User Profile</button>
 </div>
 
@@ -168,8 +190,12 @@
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app, "https://the-blob-articles-default-rtdb.firebaseio.com");
 
-    const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-    const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+    // Secure isolated Bluetooth parameters
+    const Z_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+    const Z_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+    const A_SERVICE_UUID = "8ba342a2-3f13-4043-a60d-5b23d90f23df";
+    const A_CHARACTERISTIC_UUID = "f3301a24-2c06-4074-b5a8-ef9e28f2bbd3";
 
     let deviceCache = null;
     let characteristicCache = null;
@@ -184,11 +210,15 @@
 
     window.addEventListener('load', () => {
         const savedRole = localStorage.getItem('userRole');
-        if (savedRole === 'A') showView('ayushman');
-        else if (savedRole === 'Z') {
+        if (savedRole === 'A') {
+            showView('ayushman');
+            initDatabaseListener('ayushman', 'notificationLightA', 'notificationTextA', 'statusA');
+        } else if (savedRole === 'Z') {
             showView('zanieke');
-            initZaniekeDatabaseListener();
-        } else showView('login');
+            initDatabaseListener('zanieke', 'notificationLightZ', 'notificationTextZ', 'statusZ');
+        } else {
+            showView('login');
+        }
     });
 
     function showView(targetView) {
@@ -201,81 +231,98 @@
         if (rawInput === 'A') {
             localStorage.setItem('userRole', 'A');
             showView('ayushman');
+            initDatabaseListener('ayushman', 'notificationLightA', 'notificationTextA', 'statusA');
+            attemptBackgroundAutoConnect();
         } else if (rawInput === 'Z') {
             localStorage.setItem('userRole', 'Z');
             showView('zanieke');
-            initZaniekeDatabaseListener();
+            initDatabaseListener('zanieke', 'notificationLightZ', 'notificationTextZ', 'statusZ');
             attemptBackgroundAutoConnect();
         } else {
             alert("Invalid Token. Type 'A' or 'Z'.");
         }
     });
 
+    // Tap screen background connector activation
     document.body.addEventListener('click', (e) => {
-        if (localStorage.getItem('userRole') === 'Z' && !deviceCache && !isConnectingBackground) {
-            if (e.target.id !== 'logoutBtnZ' && e.target.id !== 'loginBtn') {
+        const currentRole = localStorage.getItem('userRole');
+        if ((currentRole === 'A' || currentRole === 'Z') && !deviceCache && !isConnectingBackground) {
+            if (e.target.id !== 'logoutBtnZ' && e.target.id !== 'logoutBtnA' && e.target.id !== 'loginBtn') {
                 attemptBackgroundAutoConnect();
             }
         }
     });
 
-    // --- AUTOMATIC BACKGROUND RECONNECT ENGINE ---
+    // --- AUTOMATIC RECONNECT ENGINE ---
     async function attemptBackgroundAutoConnect() {
         if (!navigator.bluetooth || !navigator.bluetooth.getDevices) return;
         
-        const statusDiv = document.getElementById('status');
+        const role = localStorage.getItem('userRole');
+        const isZ = (role === 'Z');
+        const statusDiv = document.getElementById(isZ ? 'statusZ' : 'statusA');
+        const targetPrefix = isZ ? "Zanieke" : "Ayushman";
+        const serviceUuid = isZ ? Z_SERVICE_UUID : A_SERVICE_UUID;
+        const charUuid = isZ ? Z_CHARACTERISTIC_UUID : A_CHARACTERISTIC_UUID;
+
         isConnectingBackground = true;
 
         try {
             const devices = await navigator.bluetooth.getDevices();
-            const targetDevice = devices.find(d => d.name && d.name.startsWith("Zanieke"));
+            const targetDevice = devices.find(d => d.name && d.name.startsWith(targetPrefix));
 
             if (targetDevice) {
                 statusDiv.innerText = "Hardware Status: Reconnecting quietly...";
-                setupDeviceListeners(targetDevice);
+                setupDeviceListeners(targetDevice, isZ);
                 const server = await targetDevice.gatt.connect();
-                const service = await server.getPrimaryService(SERVICE_UUID);
-                characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                const service = await server.getPrimaryService(serviceUuid);
+                characteristicCache = await service.getCharacteristic(charUuid);
                 
                 statusDiv.innerText = "Hardware Status: Device Synced Successfully!";
                 pushMessageToHardware();
             }
         } catch (err) {
-            console.log("Background link bypass:", err.message);
+            console.log("Background reconnect skipped:", err.message);
         } finally {
             isConnectingBackground = false;
         }
     }
 
-    // --- AYUSHMAN TRANSMITTER ---
-    document.getElementById('ayushmanSendBtn').addEventListener('click', async () => {
-        const msgText = document.getElementById('ayushmanMsg').value;
-        const statusText = document.getElementById('ayushmanStatus');
+    // --- SEND CODES TO CLOUD ---
+    document.getElementById('ayushmanSendBtn').addEventListener('click', () => {
+        sendMessageToCloud('zanieke', 'ayushmanMsg', 'ayushmanStatus');
+    });
+
+    document.getElementById('zaniekeSendBtn').addEventListener('click', () => {
+        sendMessageToCloud('ayushman', 'zaniekeMsg', 'zaniekeStatus');
+    });
+
+    async function sendMessageToCloud(targetUser, inputId, statusId) {
+        const msgText = document.getElementById(inputId).value;
+        const statusText = document.getElementById(statusId);
         if (!msgText) return;
 
-        statusText.innerText = "Status: Uploading payload...";
+        statusText.innerText = "Status: Uploading...";
         try {
-            await set(ref(db, 'messages/zanieke'), { 
+            await set(ref(db, `messages/${targetUser}`), { 
                 text: msgText, 
                 timestamp: Date.now() 
             });
-            statusText.innerText = "Status: Successfully Sent to Cloud Storage!";
-            document.getElementById('ayushmanMsg').value = "";
+            statusText.innerText = "Status: Sent to Cloud!";
+            document.getElementById(inputId).value = "";
         } catch (err) {
             statusText.innerText = "Error: " + err.message;
         }
-    });
+    }
 
-    // --- ZANIEKE LIVE DATABASE STREAM ---
-    function initZaniekeDatabaseListener() {
-        onValue(ref(db, 'messages/zanieke'), (snapshot) => {
+    // --- LIVE DATABASE RECEIVERS ---
+    function initDatabaseListener(userKey, lightId, textId, statusDivId) {
+        onValue(ref(db, `messages/${userKey}`), (snapshot) => {
             const data = snapshot.val();
             if (data && data.text) {
                 currentLiveMessage = data.text;
                 
-                // Light turns green here to indicate a message exists, but the text is NEVER displayed in the UI
-                const lightElement = document.getElementById('notificationLight');
-                const lightText = document.getElementById('notificationText');
+                const lightElement = document.getElementById(lightId);
+                const lightText = document.getElementById(textId);
                 
                 lightElement.classList.remove('light-red');
                 lightElement.classList.add('light-green');
@@ -286,32 +333,44 @@
         });
     }
 
-    // Manual backup pairing handler
-    document.getElementById('zaniekeConnectBtn').addEventListener('click', async () => {
-        const statusDiv = document.getElementById('status');
+    // --- MANUAL BLUETOOTH PAIRING SEQUENCERS ---
+    document.getElementById('zaniekeConnectBtn').addEventListener('click', () => {
+        manualConnect(true);
+    });
+
+    document.getElementById('ayushmanConnectBtn').addEventListener('click', () => {
+        manualConnect(false);
+    });
+
+    async function manualConnect(isZ) {
+        const statusDiv = document.getElementById(isZ ? 'statusZ' : 'statusA');
+        const targetPrefix = isZ ? "Zanieke" : "Ayushman";
+        const serviceUuid = isZ ? Z_SERVICE_UUID : A_SERVICE_UUID;
+        const charUuid = isZ ? Z_CHARACTERISTIC_UUID : A_CHARACTERISTIC_UUID;
+
         try {
-            statusDiv.innerText = "Hardware Status: Opening Bluetooth Scanner...";
+            statusDiv.innerText = "Hardware Status: Scanning...";
             const device = await navigator.bluetooth.requestDevice({
-                filters: [{ services: [SERVICE_UUID] }, { namePrefix: "Zanieke" }],
-                optionalServices: [SERVICE_UUID]
+                filters: [{ services: [serviceUuid] }, { namePrefix: targetPrefix }],
+                optionalServices: [serviceUuid]
             });
 
-            setupDeviceListeners(device);
-            statusDiv.innerText = `Hardware Status: Establishing link...`;
+            setupDeviceListeners(device, isZ);
+            statusDiv.innerText = `Hardware Status: Pairing...`;
             const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(SERVICE_UUID);
-            characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
+            const service = await server.getPrimaryService(serviceUuid);
+            characteristicCache = await service.getCharacteristic(charUuid);
 
             statusDiv.innerText = "Hardware Status: Device Synced Successfully!";
             pushMessageToHardware();
         } catch (error) {
             statusDiv.innerText = "Connection Error: " + error.message;
         }
-    });
+    }
 
-    function setupDeviceListeners(device) {
+    function setupDeviceListeners(device, isZ) {
         deviceCache = device;
-        device.addEventListener('gattserverdisconnected', onDisconnected);
+        device.addEventListener('gattserverdisconnected', () => onDisconnected(isZ));
     }
 
     async function pushMessageToHardware() {
@@ -320,17 +379,16 @@
             const encoder = new TextEncoder();
             await characteristicCache.writeValue(encoder.encode(currentLiveMessage));
         } catch (error) {
-            console.error("Hardware stream exception:", error.message);
+            console.error("Hardware push failed:", error.message);
         }
     }
 
-    function onDisconnected() {
-        const statusDiv = document.getElementById('status');
+    function onDisconnected(isZ) {
+        const statusDiv = document.getElementById(isZ ? 'statusZ' : 'statusA');
         statusDiv.innerText = "Hardware Status: Offline";
         
-        // Reset visual alert system back to red defaults on disconnect
-        const lightElement = document.getElementById('notificationLight');
-        const lightText = document.getElementById('notificationText');
+        const lightElement = document.getElementById(isZ ? 'notificationLightZ' : 'notificationLightA');
+        const lightText = document.getElementById(isZ ? 'notificationTextZ' : 'notificationTextA');
         lightElement.classList.remove('light-green');
         lightElement.classList.add('light-red');
         lightText.innerText = "No New Message Detected";
@@ -339,12 +397,18 @@
         deviceCache = null;
     }
 
-    const runLogout = () => {
-        localStorage.clear();
-        location.reload();
+    // --- SECURE SHIFT SYSTEM WITH PASSWORD ---
+    const runProfileShift = () => {
+        const promptInput = prompt("Enter Switch Profile Password:");
+        if (promptInput === "ilovezan123") {
+            localStorage.clear();
+            location.reload();
+        } else if (promptInput !== null) {
+            alert("Incorrect Password!");
+        }
     };
-    document.getElementById('logoutBtnA').addEventListener('click', runLogout);
-    document.getElementById('logoutBtnZ').addEventListener('click', runLogout);
+    document.getElementById('logoutBtnA').addEventListener('click', runProfileShift);
+    document.getElementById('logoutBtnZ').addEventListener('click', runProfileShift);
 </script>
 
 </body>
