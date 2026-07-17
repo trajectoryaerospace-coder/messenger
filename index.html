@@ -2,97 +2,231 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zanieke's Device Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zanieke & Ayushman Portal</title>
     <style>
+        :root {
+            --bg-color: #0d0e12;
+            --card-color: #161820;
+            --accent-color: #ff4757;
+            --text-color: #ffffff;
+            --muted-color: #8b8d99;
+        }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #121212;
-            color: #ffffff;
+            font-family: '-apple-system', BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
-            margin: 0;
+            min-height: 100vh;
+            box-sizing: border-box;
         }
         .container {
-            background: #1e1e1e;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            text-align: center;
             width: 90%;
             max-width: 400px;
+            background: var(--card-color);
+            padding: 25px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            text-align: center;
+            box-sizing: border-box;
         }
-        button {
-            background: #ff4757;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            font-size: 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            margin: 10px 0;
-            width: 100%;
-            font-weight: bold;
-            transition: 0.2s;
-        }
-        button:hover { background: #ff6b81; }
-        button:disabled { background: #555; cursor: not-allowed; }
+        h2 { margin-bottom: 5px; font-weight: 600; }
+        .subtitle { color: var(--muted-color); font-size: 14px; margin-bottom: 25px; }
+        
+        /* Form Inputs & Buttons */
         input[type="text"] {
             width: 100%;
-            padding: 12px;
+            padding: 16px;
             margin: 15px 0;
-            border: 1px solid #333;
-            background: #2f3542;
+            border: 1px solid #2a2d3d;
+            background: #1f222e;
             color: white;
-            border-radius: 6px;
+            border-radius: 12px;
             box-sizing: border-box;
             font-size: 16px;
+            outline: none;
+            transition: 0.3s;
         }
+        input[type="text"]:focus { border-color: var(--accent-color); }
+        
+        button {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 16px 24px;
+            font-size: 16px;
+            border-radius: 12px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            transition: transform 0.1s, opacity 0.2s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        button:active { transform: scale(0.98); }
+        button:disabled { background: #3a3d4d; color: var(--muted-color); cursor: not-allowed; }
+        
         #status {
-            margin-top: 15px;
+            margin-top: 20px;
             font-size: 14px;
-            color: #a4b0be;
+            color: var(--muted-color);
+            background: #1f222e;
+            padding: 12px;
+            border-radius: 10px;
+            word-break: break-word;
+        }
+        
+        /* View switching utilities */
+        .hidden { display: none !important; }
+        .logout-btn {
+            background: transparent;
+            color: var(--muted-color);
+            font-size: 12px;
+            margin-top: 20px;
+            padding: 5px;
+            text-decoration: underline;
+            font-weight: normal;
         }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h2>Zanieke's Device Control</h2>
-    <button id="connectBtn">Find Bluetooth Devices</button>
-    
-    <input type="text" id="msgInput" placeholder="Type your message here..." disabled>
-    <button id="sendBtn" disabled>Send to OLED</button>
-    
-    <div id="status">Status: Disconnected</div>
+<div id="loginView" class="container">
+    <h2>Device Portal Access</h2>
+    <div class="subtitle">Enter access token (A or Z)</div>
+    <input type="text" id="loginInput" placeholder="Enter character..." maxlength="5">
+    <button id="loginBtn">Submit Entry</button>
 </div>
 
-<script>
+<div id="ayushmanView" class="container hidden">
+    <h2>Hello Ayushman</h2>
+    <div class="subtitle">Transmit over-the-air to Zanieke's Device</div>
+    <input type="text" id="ayushmanMsg" placeholder="Type a message for Zanieke...">
+    <button id="ayushmanSendBtn">Upload Message to Cloud</button>
+    <div id="ayushmanStatus">Status: Awaiting input...</div>
+    <button class="logout-btn" id="logoutBtnA">Switch User Profile</button>
+</div>
+
+<div id="zaniekeView" class="container hidden">
+    <h2>Hello Zanieke</h2>
+    <div class="subtitle">Sync your physical device via Bluetooth</div>
+    <button id="zaniekeConnectBtn">Connect Zanieke's Device</button>
+    <div id="status">Hardware Status: Offline & Disconnected</div>
+    <button class="logout-btn" id="logoutBtnZ">Switch User Profile</button>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js";
+
+    // Provided Application Parameters
+    const firebaseConfig = {
+        apiKey: "AIzaSyApxQJFS8Ph-rl6NcTDU3_FiyQ5He_UM6Y",
+        authDomain: "the-blob-articles.firebaseapp.com",
+        projectId: "the-blob-articles",
+        storageBucket: "the-blob-articles.firebasestorage.app",
+        messagingSenderId: "546322985129",
+        appId: "1:546322985129:web:c8b3bdae4318864893b9b8",
+        measurementId: "G-373B7K6SP0"
+    };
+
+    // Instantiate Services
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app, "https://the-blob-articles-default-rtdb.firebaseio.com");
+
+    // BLE Constants
     const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
     const CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
     let deviceCache = null;
     let characteristicCache = null;
+    let currentLiveMessage = ""; 
 
-    const connectBtn = document.getElementById('connectBtn');
-    const sendBtn = document.getElementById('sendBtn');
-    const msgInput = document.getElementById('msgInput');
-    const statusDiv = document.getElementById('status');
+    // DOM Elements Mapping
+    const views = {
+        login: document.getElementById('loginView'),
+        ayushman: document.getElementById('ayushmanView'),
+        zanieke: document.getElementById('zaniekeView')
+    };
 
-    connectBtn.addEventListener('click', async () => {
+    // Initial App Routing Check
+    window.addEventListener('load', () => {
+        const savedRole = localStorage.getItem('userRole');
+        if (savedRole === 'A') showView('ayushman');
+        else if (savedRole === 'Z') {
+            showView('zanieke');
+            initZaniekeDatabaseListener();
+        } else showView('login');
+    });
+
+    function showView(targetView) {
+        Object.keys(views).forEach(key => views[key].classList.add('hidden'));
+        views[targetView].classList.remove('hidden');
+    }
+
+    // Login Submission Handler
+    document.getElementById('loginBtn').addEventListener('click', () => {
+        const rawInput = document.getElementById('loginInput').value.trim().toUpperCase();
+        if (rawInput === 'A') {
+            localStorage.setItem('userRole', 'A');
+            showView('ayushman');
+        } else if (rawInput === 'Z') {
+            localStorage.setItem('userRole', 'Z');
+            showView('zanieke');
+            initZaniekeDatabaseListener();
+        } else {
+            alert("Invalid Token. Type 'A' for Ayushman or 'Z' for Zanieke.");
+        }
+    });
+
+    // --- AYUSHMAN PIPELINE ---
+    document.getElementById('ayushmanSendBtn').addEventListener('click', async () => {
+        const msgText = document.getElementById('ayushmanMsg').value;
+        const statusText = document.getElementById('ayushmanStatus');
+        if (!msgText) return;
+
+        statusText.innerText = "Status: Uploading payload...";
+        try {
+            // Write payload directly onto Zanieke's pending device queue path
+            await set(ref(db, 'messages/zanieke'), {
+                text: msgText,
+                timestamp: Date.now()
+            });
+            statusText.innerText = "Status: Successfully Sent to Cloud Storage!";
+            document.getElementById('ayushmanMsg').value = "";
+        } catch (err) {
+            statusText.innerText = "Error tracking database upload: " + err.message;
+        }
+    });
+
+    // --- ZANIEKE PIPELINE & HARDWARE ENGINE ---
+    function initZaniekeDatabaseListener() {
+        // Stream values quietly from cloud storage; do not show them on Zanieke's browser interface screen
+        onValue(ref(db, 'messages/zanieke'), (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.text) {
+                currentLiveMessage = data.text;
+                // If the hardware device link is currently up, flash the text immediately over the air
+                pushMessageToHardware();
+            }
+        });
+    }
+
+    document.getElementById('zaniekeConnectBtn').addEventListener('click', async () => {
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('zaniekeConnectBtn');
+
         if (deviceCache && deviceCache.gatt.connected) {
             deviceCache.disconnect();
             return;
         }
 
         try {
-            statusDiv.innerText = "Status: Opening device selector...";
-            
-            // FIXED FILTER: We now look for any device matching the custom service UUID OR named "Zanieke's Device".
-            // This prevents the browser from throwing an "Unsupported" or "Unknown" block.
+            statusDiv.innerText = "Hardware Status: Activating Local Bluetooth Scanner...";
             const device = await navigator.bluetooth.requestDevice({
                 filters: [
                     { services: [SERVICE_UUID] },
@@ -104,48 +238,57 @@
             deviceCache = device;
             device.addEventListener('gattserverdisconnected', onDisconnected);
 
-            statusDiv.innerText = `Status: Connecting to ${device.name || 'Device'}...`;
+            statusDiv.innerText = `Hardware Status: Securing connection channel...`;
             const server = await device.gatt.connect();
 
-            statusDiv.innerText = "Status: Fetching BLE Service...";
+            statusDiv.innerText = "Hardware Status: Fetching peripheral data services...";
             const service = await server.getPrimaryService(SERVICE_UUID);
 
-            statusDiv.innerText = "Status: Fetching Characteristic...";
+            statusDiv.innerText = "Hardware Status: Binding to display parameters...";
             characteristicCache = await service.getCharacteristic(CHARACTERISTIC_UUID);
 
             statusDiv.innerText = `Connected to: ${device.name || 'Zanieke\'s Device'}`;
-            connectBtn.innerText = "Disconnect";
-            msgInput.disabled = false;
-            sendBtn.disabled = false;
+            connectBtn.innerText = "Disconnect Hardware Link";
+
+            // HARDWARE TRIGGER: Instantly download pending text from cache down to physical board right upon connection
+            pushMessageToHardware();
 
         } catch (error) {
-            statusDiv.innerText = "Error: " + error.message;
+            statusDiv.innerText = "Hardware Connection Error: " + error.message;
             console.error(error);
         }
     });
 
-    sendBtn.addEventListener('click', async () => {
-        const text = msgInput.value;
-        if (!text || !characteristicCache) return;
+    async function pushMessageToHardware() {
+        const statusDiv = document.getElementById('status');
+        if (!characteristicCache || !currentLiveMessage) return;
 
         try {
-            statusDiv.innerText = "Status: Sending message...";
+            statusDiv.innerText = "Hardware Status: Pushing remote cloud text to OLED screen...";
             const encoder = new TextEncoder();
-            await characteristicCache.writeValue(encoder.encode(text));
-            statusDiv.innerText = "Status: Message Sent Successfully!";
+            await characteristicCache.writeValue(encoder.encode(currentLiveMessage));
+            statusDiv.innerText = `Synced! Message on Screen: "${currentLiveMessage}"`;
         } catch (error) {
-            statusDiv.innerText = "Error sending data: " + error.message;
+            statusDiv.innerText = "Failed transmission update: " + error.message;
         }
-    });
+    }
 
     function onDisconnected() {
-        statusDiv.innerText = "Status: Disconnected";
-        connectBtn.innerText = "Find Bluetooth Devices";
-        msgInput.disabled = true;
-        sendBtn.disabled = true;
+        const statusDiv = document.getElementById('status');
+        const connectBtn = document.getElementById('zaniekeConnectBtn');
+        statusDiv.innerText = "Hardware Status: Offline & Disconnected";
+        connectBtn.innerText = "Connect Zanieke's Device";
         characteristicCache = null;
         deviceCache = null;
     }
+
+    // Profile reset mechanics
+    const runLogout = () => {
+        localStorage.clear();
+        location.reload();
+    };
+    document.getElementById('logoutBtnA').addEventListener('click', runLogout);
+    document.getElementById('logoutBtnZ').addEventListener('click', runLogout);
 </script>
 
 </body>
